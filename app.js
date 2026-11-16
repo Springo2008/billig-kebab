@@ -35,6 +35,9 @@ const BilligKebabReports = window.BilligKebabReports;
     emptyState: document.getElementById("empty-state"),
     findButton: document.getElementById("find-button"),
     fuelCost: document.getElementById("fuel-cost"),
+    map: document.getElementById("shop-map"),
+    mapSection: document.getElementById("map-section"),
+    mapStatus: document.getElementById("map-status"),
     radius: document.getElementById("radius-select"),
     shopList: document.getElementById("shop-list"),
     status: document.getElementById("status-message"),
@@ -48,6 +51,8 @@ const BilligKebabReports = window.BilligKebabReports;
   let currentPosition = null;
   let currentUser = null;
   let isRegistering = false;
+  let mapInstance = null;
+  let mapMarkers = null;
   let activeSearchId = 0;
   let requestController = null;
 
@@ -276,6 +281,7 @@ const BilligKebabReports = window.BilligKebabReports;
     elements.comparison.hidden = true;
     elements.shopList.replaceChildren();
     elements.emptyState.hidden = true;
+    elements.mapSection.hidden = true;
 
     try {
       const data = await requestOverpass(query, signal);
@@ -421,6 +427,69 @@ const BilligKebabReports = window.BilligKebabReports;
     }
   }
 
+  function renderMap() {
+    elements.mapSection.hidden = shops.length === 0;
+    if (shops.length === 0) {
+      if (mapMarkers) {
+        mapMarkers.clearLayers();
+      }
+      return;
+    }
+
+    if (!window.L) {
+      elements.map.hidden = true;
+      elements.mapStatus.textContent = "Kartet kunne ikke lastes. Stedene vises fortsatt i listen.";
+      elements.mapStatus.hidden = false;
+      return;
+    }
+
+    elements.map.hidden = false;
+    elements.mapStatus.hidden = true;
+    if (!mapInstance) {
+      const { latitude, longitude } = currentPosition.coords;
+      mapInstance = window.L.map(elements.map, { scrollWheelZoom: false });
+      window.L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap-bidragsytere</a>',
+      }).addTo(mapInstance);
+      window.L.control.scale({ metric: true, imperial: false }).addTo(mapInstance);
+      mapMarkers = window.L.layerGroup().addTo(mapInstance);
+      mapInstance.setView([latitude, longitude], 13);
+    }
+
+    mapMarkers.clearLayers();
+    const bounds = [];
+    for (const shop of shops) {
+      const point = [shop.lat, shop.lon];
+      bounds.push(point);
+      window.L.circleMarker(point, {
+        color: "#fffefa",
+        fillColor: "#355d3d",
+        fillOpacity: 1,
+        radius: 8,
+        weight: 2,
+      })
+        .bindPopup(`<strong>${escapeHtml(shop.name)}</strong><br>${formatDistance(shop.distanceKm)} km unna`)
+        .addTo(mapMarkers);
+    }
+
+    const { latitude, longitude } = currentPosition.coords;
+    const userPoint = [latitude, longitude];
+    bounds.push(userPoint);
+    window.L.circleMarker(userPoint, {
+      color: "#fffefa",
+      fillColor: "#3678c8",
+      fillOpacity: 1,
+      radius: 7,
+      weight: 2,
+    })
+      .bindPopup("<strong>Du er her</strong>")
+      .addTo(mapMarkers);
+
+    mapInstance.fitBounds(window.L.latLngBounds(bounds).pad(0.15), { maxZoom: 14 });
+    requestAnimationFrame(() => mapInstance.invalidateSize());
+  }
+
   function renderResults() {
     const fuelCost = getFuelCost();
     const pricedShops = shops
@@ -487,6 +556,7 @@ const BilligKebabReports = window.BilligKebabReports;
     }).join("");
 
     elements.emptyState.hidden = shops.length > 0;
+    renderMap();
     if (shops.length === 0 && currentPosition) {
       elements.emptyState.querySelector("strong").textContent = "Ingen steder funnet i dette området.";
       elements.emptyState.querySelector("span").textContent = "Prøv å utvide søkeavstanden eller søk igjen senere.";

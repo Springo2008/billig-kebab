@@ -22,7 +22,7 @@ The app uses the Firebase project configuration supplied by the project owner in
 4. Add `springo2008.github.io` and `localhost` to Authentication's authorized domains.
 5. The first submitted price creates the `priceReports` collection automatically.
 
-This Firebase project is also used by the Whiteboard app. Merge the price-report rules block into the existing rules; do not replace the full ruleset or the Whiteboard's permissions will be removed. Without that block, Firebase returns `permission-denied` and reports cannot be read or submitted. Firebase's web configuration is public by design; it does not grant database access by itself. Restrict the API key to the app's domains and required Firebase APIs, and never publish a service-account key. Firebase usage is subject to the project's quotas and billing settings.
+This Firebase project is also used by the Whiteboard app. Merge the price-report rules block into the existing rules; do not replace the full ruleset or the Whiteboard's permissions will be removed. Without that block, Firebase returns `permission-denied` and reports cannot be read or submitted. The Firebase web API key is included in the public frontend by design; it is not a password and does not grant database access by itself. Restrict it in Google Cloud Console to the app's HTTP referrers and required Firebase APIs, and never publish a service-account key. Firebase usage is subject to the project's quotas and billing settings.
 
 ## Submit and approve prices
 
@@ -32,6 +32,6 @@ Reports include the kebab type, so compare like with like. Users can always ente
 
 ## Map data and deployment
 
-Nearby places come from OpenStreetMap's public Overpass API. If the primary instance fails, the app tries a public fallback instance; Firebase stores prices, not map locations, so it cannot replace OpenStreetMap place search if both map services are unavailable. The app does not store geolocation. Driving costs are estimates based on straight-line distance, a 1.35 road-distance multiplier, and the fuel cost you enter.
+Nearby places come from OpenStreetMap's public Overpass API. If the primary instance fails, the app tries a public fallback instance. The interactive map uses Leaflet and OpenStreetMap map tiles and needs no API key; OpenStreetMap attribution is shown on the map. The app does not store geolocation. Driving costs are estimates based on straight-line distance, a 1.35 road-distance multiplier, and the fuel cost you enter.
 
 The `Deploy static site to GitHub Pages` workflow publishes the site on pushes to `main`.

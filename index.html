@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f5f2e9">
     <title>Billig kebab — finn det beste kjøpet</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <link rel="stylesheet" href="styles.css">
+    <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
     <script type="module" src="app.js"></script>
   </head>
   <body>
@@ -76,6 +78,14 @@
         </div>
 
         <div id="comparison" class="comparison" hidden></div>
+        <section class="map-section" id="map-section" hidden aria-labelledby="map-heading">
+          <div class="map-heading">
+            <h3 id="map-heading">Kebabsteder i nærheten</h3>
+            <span>Trykk på en markør for å se stedet.</span>
+          </div>
+          <p class="map-status" id="map-status" role="status" hidden></p>
+          <div id="shop-map" class="shop-map" role="region" aria-label="Kart over kebabsteder nær deg"></div>
+        </section>
         <div class="shop-list" id="shop-list" aria-live="polite"></div>
         <div class="empty-state" id="empty-state">
           <div class="empty-icon" aria-hidden="true">✳</div>
