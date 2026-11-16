@@ -1,6 +1,6 @@
-# Billig kebab
+# Billigkebab
 
-Billig kebab finds nearby kebab shops, compares submitted prices plus estimated round-trip fuel costs, and lets people share restaurant prices. The frontend is static and uses Firebase for accounts and reports.
+Billigkebab finds nearby kebab shops, compares submitted prices plus estimated round-trip fuel costs, and lets people share restaurant prices. The frontend is static and uses Firebase for accounts and reports.
 
 ## Run locally
 
@@ -20,13 +20,14 @@ The app uses the Firebase project configuration supplied by the project owner in
 2. Create the default Cloud Firestore database.
 3. In **Firestore Database → Rules**, add the block from `firestore-price-reports.rules` inside your existing `match /databases/{database}/documents` rules, then publish the merged rules.
 4. Add `springo2008.github.io` and `localhost` to Authentication's authorized domains.
-5. The first submitted price creates the `priceReports` collection automatically.
+5. In **Firestore Database → Indexes**, create a collection-scope composite index for `priceReports`: `status` ascending and `createdAt` descending (as listed in `firestore.indexes.json`).
+6. The first submitted price creates the `priceReports` collection automatically.
 
-This Firebase project is also used by the Whiteboard app. Merge the price-report rules block into the existing rules; do not replace the full ruleset or the Whiteboard's permissions will be removed. Without that block, Firebase returns `permission-denied` and reports cannot be read or submitted. The Firebase web API key is included in the public frontend by design; it is not a password and does not grant database access by itself. Restrict it in Google Cloud Console to the app's HTTP referrers and required Firebase APIs, and never publish a service-account key. Firebase usage is subject to the project's quotas and billing settings.
+This Firebase project is also used by the Whiteboard app. Merge the price-report rules block into the existing rules; do not replace the full ruleset or the Whiteboard's permissions will be removed. Without that block, Firebase returns `permission-denied` and reports cannot be read or submitted. The Firebase web API key is included in the public frontend by design; it is not a password and does not grant database access by itself. Restrict it in Google Cloud Console to the HTTP referrers of every frontend using this Firebase project (including Whiteboard) and only the required Firebase APIs. Never publish a service-account key. Firebase usage is subject to the project's quotas and billing settings.
 
 ## Submit and approve prices
 
-Log in or create an account, then choose **Logg en pris for andre** on a shop card. Reports are saved as `pending` in Firestore and are not used in comparisons until an administrator changes their `status` to `approved` in the Firebase console. Client-side rules prevent users from approving or editing reports. The app reads up to 200 approved reports and uses the newest report per OpenStreetMap place ID.
+Log in or create an account, then choose **Logg en pris for andre** on a shop card. Reports are saved as `pending` in Firestore and are not used in comparisons until an administrator changes their `status` to `approved` in the Firebase console. Client-side rules prevent users from approving or editing reports. The app reads the 200 most recently submitted approved reports and uses the newest purchase date per OpenStreetMap place ID.
 
 Reports include the kebab type, so compare like with like. Users can always enter their own temporary price in the comparison input.
 

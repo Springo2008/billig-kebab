@@ -5,6 +5,7 @@ import {
   getDocs,
   getFirestore,
   limit,
+  orderBy,
   query,
   serverTimestamp,
   where,
@@ -34,6 +35,7 @@ async function getApprovedPriceReports() {
   const reports = await getDocs(query(
     collection(db, "priceReports"),
     where("status", "==", "approved"),
+    orderBy("createdAt", "desc"),
     limit(200),
   ));
   return reports.docs.map((report) => ({ id: report.id, ...report.data() }));

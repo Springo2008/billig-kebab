@@ -44,7 +44,7 @@ const BilligKebabReports = window.BilligKebabReports;
   };
 
   let shops = [];
-  let shopPrices = new Map();
+  const shopPrices = new Map();
   let communityPrices = new Map();
   let communityPricesLoaded = false;
   let communityPricesPromise = null;
@@ -112,7 +112,7 @@ const BilligKebabReports = window.BilligKebabReports;
   function getAddress(tags) {
     const street = [tags["addr:street"], tags["addr:housenumber"]].filter(Boolean).join(" ");
     const city = tags["addr:city"];
-    return [street, city].filter(Boolean).join(", ") || "Adresse ikke registrert";
+    return cleanLine([street, city].filter(Boolean).join(", ")).slice(0, 200) || "Adresse ikke registrert";
   }
 
   function getManualPrice(shopId) {
@@ -121,7 +121,7 @@ const BilligKebabReports = window.BilligKebabReports;
       return null;
     }
     const price = Number(rawPrice);
-    return Number.isFinite(price) && price >= 0 ? price : null;
+    return Number.isInteger(price) && price >= 0 && price <= 9999 ? price : null;
   }
 
   function getPrice(shopId) {
@@ -236,13 +236,30 @@ const BilligKebabReports = window.BilligKebabReports;
     const uniqueShops = new Map();
 
     for (const element of elementsFromApi) {
-      const tags = element.tags || {};
+      if (
+        !element
+        || typeof element !== "object"
+        || !["node", "way", "relation"].includes(element.type)
+        || !Number.isSafeInteger(element.id)
+        || element.id <= 0
+      ) {
+        continue;
+      }
+
+      const tags = element.tags && typeof element.tags === "object" ? element.tags : {};
       const coordinates = getElementCoordinates(element);
-      if (!coordinates) {
+      if (
+        !coordinates
+        || coordinates.lat < -90
+        || coordinates.lat > 90
+        || coordinates.lon < -180
+        || coordinates.lon > 180
+      ) {
         continue;
       }
 
       const id = `${element.type}/${element.id}`;
+      const rawName = [tags.name, tags["name:nb"]].find((name) => typeof name === "string" && name.trim());
       const distanceKm = haversineDistanceKm(
         position.coords.latitude,
         position.coords.longitude,
@@ -251,9 +268,9 @@ const BilligKebabReports = window.BilligKebabReports;
       );
       uniqueShops.set(id, {
         id,
-        name: tags.name || tags["name:nb"] || "Kebabsted uten navn",
+        name: cleanLine(rawName || "Kebabsted uten navn").slice(0, 120),
         address: getAddress(tags),
-        cuisine: tags.cuisine || "",
+        cuisine: typeof tags.cuisine === "string" ? cleanLine(tags.cuisine).slice(0, 100) : "",
         distanceKm,
         lat: coordinates.lat,
         lon: coordinates.lon,
@@ -274,7 +291,6 @@ const BilligKebabReports = window.BilligKebabReports;
     const communityPromise = loadCommunityPrices().then(() => null).catch((error) => error);
 
     shops = [];
-    shopPrices.clear();
     elements.findButton.disabled = true;
     elements.findButton.querySelector("span").textContent = "Søker …";
     setStatus("Søker etter kebabsteder i OpenStreetMap …");
@@ -286,7 +302,6 @@ const BilligKebabReports = window.BilligKebabReports;
     try {
       const data = await requestOverpass(query, signal);
       shops = normalizeShops(data.elements, position);
-      shopPrices = new Map();
       renderResults();
 
       if (shops.length === 0) {
@@ -545,7 +560,7 @@ const BilligKebabReports = window.BilligKebabReports;
               <div class="report-fields">
                 <label>Kebabtype<input name="product" type="text" maxlength="70" value="Kebab" required></label>
                 <label>Pris i kroner<input name="report-price" type="number" min="1" max="9999" step="1" inputmode="numeric" value="${manualPrice === null ? "" : manualPrice}" required></label>
-                <label>Dato kjøpt<input name="observed-at" type="date" value="${localDate()}" required></label>
+                <label>Dato kjøpt<input name="observed-at" type="date" max="${localDate()}" value="${localDate()}" required></label>
               </div>
               <label class="report-note">Kommentar (valgfritt)<input name="note" type="text" maxlength="200" placeholder="For eksempel størrelse eller menyvalg"></label>
               <button class="report-submit" type="submit">Send inn pris</button>
@@ -632,11 +647,21 @@ const BilligKebabReports = window.BilligKebabReports;
     const price = Number(form.elements["report-price"].value);
     const observedAt = form.elements["observed-at"].value;
     const note = cleanLine(form.elements.note.value) || "Ingen kommentar";
-    if (!product || !Number.isFinite(price) || price <= 0 || price > 9999 || !/^\d{4}-\d{2}-\d{2}$/.test(observedAt)) {
+    if (
+      !product
+      || !Number.isInteger(price)
+      || price <= 0
+      || price > 9999
+      || !BilligKebabReports.isValidDate(observedAt)
+      || observedAt > localDate()
+    ) {
       setStatus("Sjekk kebabtype, pris og dato før du sender inn.", "error");
       return;
     }
 
+    const submitButton = form.querySelector(".report-submit");
+    submitButton.disabled = true;
+    submitButton.textContent = "Sender …";
     try {
       await savePriceReport({
         restaurantId: shop.id,
@@ -653,6 +678,9 @@ const BilligKebabReports = window.BilligKebabReports;
       setStatus("Takk! Prisen er sendt inn og venter på godkjenning.", "success");
     } catch (error) {
       setStatus(`Kunne ikke lagre prisen i Firebase (${error.code || error.message || "ukjent feil"}).`, "error");
+    } finally {
+      submitButton.disabled = false;
+      submitButton.textContent = "Send inn pris";
     }
   });
 
@@ -661,6 +689,7 @@ const BilligKebabReports = window.BilligKebabReports;
     elements.authTitle.textContent = registering ? "Opprett konto" : "Logg inn";
     elements.authSubmit.textContent = registering ? "Opprett konto" : "Logg inn";
     elements.authToggle.textContent = registering ? "Har du allerede konto? Logg inn" : "Ny her? Opprett konto";
+    elements.authForm.elements.password.autocomplete = registering ? "new-password" : "current-password";
     elements.authError.textContent = "";
   }
 
@@ -684,6 +713,7 @@ const BilligKebabReports = window.BilligKebabReports;
     const email = elements.authForm.elements.email.value.trim();
     const password = elements.authForm.elements.password.value;
 
+    elements.authSubmit.disabled = true;
     try {
       if (isRegistering) {
         await createUserWithEmailAndPassword(auth, email, password);
@@ -700,6 +730,8 @@ const BilligKebabReports = window.BilligKebabReports;
         "auth/weak-password": "Passordet må være minst 6 tegn.",
       };
       elements.authError.textContent = messages[error.code] || `Kunne ikke logge inn (${error.code || error.message || "ukjent feil"}).`;
+    } finally {
+      elements.authSubmit.disabled = false;
     }
   });
   elements.authLogout.addEventListener("click", async () => {

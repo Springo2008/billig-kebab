@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { latestApprovedReports } = require("../reports.js");
+const { isValidDate, latestApprovedReports } = require("../reports.js");
 
 function priceReport(id, date, price, extra = {}) {
   return {
@@ -44,6 +44,14 @@ test("ignores pending and malformed reports", () => {
     restaurantId: "javascript:alert(1)",
   });
   const badPrice = priceReport("bad-price", "2026-11-12", -10);
+  const excessivePrice = priceReport("excessive-price", "2026-11-12", 10000);
 
-  assert.equal(latestApprovedReports([pending, badDate, badPlace, badPrice]).size, 0);
+  assert.equal(latestApprovedReports([pending, badDate, badPlace, badPrice, excessivePrice]).size, 0);
+});
+
+test("validates real calendar dates, including leap days", () => {
+  assert.equal(isValidDate("2024-02-29"), true);
+  assert.equal(isValidDate("2026-02-29"), false);
+  assert.equal(isValidDate("2026-13-01"), false);
+  assert.equal(isValidDate(null), false);
 });

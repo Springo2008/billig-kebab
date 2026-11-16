@@ -5,7 +5,7 @@
   const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
   function isValidDate(value) {
-    if (!DATE_PATTERN.test(value)) {
+    if (typeof value !== "string" || !DATE_PATTERN.test(value)) {
       return false;
     }
 
@@ -28,11 +28,15 @@
       : Number(report.createdAt) || 0;
 
     if (
-      !OSM_ID_PATTERN.test(osmId)
-      || !name
-      || !product
+      typeof osmId !== "string"
+      || !OSM_ID_PATTERN.test(osmId)
+      || typeof name !== "string"
+      || !name.trim()
+      || typeof product !== "string"
+      || !product.trim()
       || !Number.isFinite(price)
       || price <= 0
+      || price > 9999
       || !isValidDate(observedAt)
     ) {
       return null;
@@ -64,7 +68,7 @@
     return latestByPlace;
   }
 
-  const reports = { latestApprovedReports, parseApprovedReport };
+  const reports = { isValidDate, latestApprovedReports, parseApprovedReport };
 
   if (typeof module !== "undefined" && module.exports) {
     module.exports = reports;
