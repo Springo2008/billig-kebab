@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="nb">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f2e9">
+    <title>Billig kebab — finn det beste kjøpet</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="pricing.js" defer></script>
+    <script src="reports.js" defer></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="wordmark" href="#" aria-label="Billig kebab, hjem">
+        <span class="wordmark-icon" aria-hidden="true">B</span>
+        billig kebab<span class="wordmark-dot">.</span>
+      </a>
+      <span class="topbar-note">Et smart valg smaker best.</span>
+    </header>
+
+    <main>
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow"><span class="eyebrow-line"></span> KEBABKARTET</p>
+        <h1 id="page-title">Billigst er ikke alltid <em>nærmest.</em></h1>
+        <p class="intro-copy">Sammenlign kebabpriser, logg egne funn og se om kjøreturen lønner seg.</p>
+      </section>
+
+      <section class="search-panel" aria-label="Finn kebab i nærheten">
+        <div class="search-main">
+          <div class="search-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M20 10.2c0 5.1-8 11-8 11s-8-5.9-8-11a8 8 0 1 1 16 0Z" stroke="currentColor" stroke-width="1.7"/>
+              <circle cx="12" cy="10" r="2.6" stroke="currentColor" stroke-width="1.7"/>
+            </svg>
+          </div>
+          <div class="search-copy">
+            <strong>Finn kebab rundt deg</strong>
+            <span>Finn steder, sammenlign godkjente priser og del egne funn.</span>
+          </div>
+          <button class="primary-button" id="find-button" type="button">
+            <span>Finn steder</span>
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+        <div class="search-footer">
+          <label for="radius-select">Søkeavstand</label>
+          <select id="radius-select">
+            <option value="5000">5 km</option>
+            <option value="10000" selected>10 km</option>
+            <option value="20000">20 km</option>
+          </select>
+          <span class="search-footer-note">Posisjonen din lagres ikke i appen.</span>
+        </div>
+      </section>
+
+      <p class="status-message" id="status-message" role="status" aria-live="polite">
+        Trykk «Finn steder» for å starte.
+      </p>
+
+      <section class="results-section" aria-labelledby="results-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow"><span class="eyebrow-line"></span> PRIS MOT AVSTAND</p>
+            <h2 id="results-title">Hva lønner seg?</h2>
+          </div>
+          <label class="fuel-setting" for="fuel-cost">
+            <span>Drivstoff per km</span>
+            <span class="fuel-input-wrap"><input id="fuel-cost" type="number" min="0" max="100" step="0.1" value="2.5" inputmode="decimal"><span>kr</span></span>
+          </label>
+        </div>
+
+        <div id="comparison" class="comparison" hidden></div>
+        <div class="shop-list" id="shop-list" aria-live="polite"></div>
+        <div class="empty-state" id="empty-state">
+          <div class="empty-icon" aria-hidden="true">✳</div>
+          <strong>Den perfekte kebaben er der ute.</strong>
+          <span>Finn steder i nærheten, legg inn kebabprisene og se hva som lønner seg.</span>
+        </div>
+      </section>
+
+      <aside class="estimate-note">
+        <span class="note-icon" aria-hidden="true">i</span>
+        <p>Prisrapporter kontrolleres før de vises, men sammenlign samme kebabtype. Kjørekostnaden er et grovt estimat basert på luftlinje og ca. 1,35× kjørevei tur-retur. Parkering og andre kostnader er ikke med.</p>
+      </aside>
+    </main>
+
+    <footer class="footer">
+      <span>Lag gode valg. Spis godt.</span>
+      <span>Stedsdata © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap-bidragsytere</a></span>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,506 @@
+(function () {
+  "use strict";
+
+  const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+  const REPOSITORY = "Springo2008/billig-kebab";
+  const COMMUNITY_REPORTS_URL = `https://api.github.com/repos/${REPOSITORY}/issues?state=closed&labels=verified-price&per_page=100&sort=updated&direction=desc`;
+  const elements = {
+    comparison: document.getElementById("comparison"),
+    emptyState: document.getElementById("empty-state"),
+    findButton: document.getElementById("find-button"),
+    fuelCost: document.getElementById("fuel-cost"),
+    radius: document.getElementById("radius-select"),
+    shopList: document.getElementById("shop-list"),
+    status: document.getElementById("status-message"),
+  };
+
+  let shops = [];
+  let shopPrices = new Map();
+  let communityPrices = new Map();
+  let communityPricesLoaded = false;
+  let currentPosition = null;
+  let requestController = null;
+
+  function setStatus(message, kind) {
+    elements.status.textContent = message;
+    if (kind) {
+      elements.status.dataset.kind = kind;
+    } else {
+      delete elements.status.dataset.kind;
+    }
+  }
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, (character) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    })[character]);
+  }
+
+  function formatMoney(amount) {
+    return new Intl.NumberFormat("nb-NO", {
+      style: "currency",
+      currency: "NOK",
+      maximumFractionDigits: 0,
+    }).format(amount);
+  }
+
+  function formatDistance(distanceKm) {
+    return new Intl.NumberFormat("nb-NO", {
+      maximumFractionDigits: 1,
+      minimumFractionDigits: 1,
+    }).format(distanceKm);
+  }
+
+  function haversineDistanceKm(lat1, lon1, lat2, lon2) {
+    const radians = (degrees) => degrees * Math.PI / 180;
+    const deltaLat = radians(lat2 - lat1);
+    const deltaLon = radians(lon2 - lon1);
+    const a = Math.sin(deltaLat / 2) ** 2
+      + Math.cos(radians(lat1)) * Math.cos(radians(lat2)) * Math.sin(deltaLon / 2) ** 2;
+    return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  function getElementCoordinates(element) {
+    if (Number.isFinite(element.lat) && Number.isFinite(element.lon)) {
+      return { lat: element.lat, lon: element.lon };
+    }
+    if (element.center && Number.isFinite(element.center.lat) && Number.isFinite(element.center.lon)) {
+      return element.center;
+    }
+    return null;
+  }
+
+  function getAddress(tags) {
+    const street = [tags["addr:street"], tags["addr:housenumber"]].filter(Boolean).join(" ");
+    const city = tags["addr:city"];
+    return [street, city].filter(Boolean).join(", ") || "Adresse ikke registrert";
+  }
+
+  function getManualPrice(shopId) {
+    const rawPrice = shopPrices.get(shopId);
+    if (rawPrice === undefined || rawPrice.trim() === "") {
+      return null;
+    }
+    const price = Number(rawPrice);
+    return Number.isFinite(price) && price >= 0 ? price : null;
+  }
+
+  function getPrice(shopId) {
+    const manualPrice = getManualPrice(shopId);
+    if (manualPrice !== null) {
+      return manualPrice;
+    }
+    const report = communityPrices.get(shopId);
+    return report ? report.price : null;
+  }
+
+  async function loadCommunityPrices() {
+    if (communityPricesLoaded) {
+      return;
+    }
+
+    const response = await fetch(COMMUNITY_REPORTS_URL, {
+      headers: { Accept: "application/vnd.github+json" },
+    });
+    if (!response.ok) {
+      throw new Error(`GitHub svarte med ${response.status}.`);
+    }
+    const issues = await response.json();
+    if (!Array.isArray(issues)) {
+      throw new Error("GitHub returnerte et ugyldig svar.");
+    }
+    communityPrices = BilligKebabReports.latestVerifiedReports(issues);
+    communityPricesLoaded = true;
+  }
+
+  function localDate() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  function formatReportDate(value) {
+    return new Intl.DateTimeFormat("nb-NO", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(new Date(`${value}T00:00:00.000Z`));
+  }
+
+  function cleanLine(value) {
+    return String(value).replace(/[\r\n\u0000-\u001f]+/g, " ").trim();
+  }
+
+  function getFuelCost() {
+    if (elements.fuelCost.value.trim() === "") {
+      return null;
+    }
+    const value = Number(elements.fuelCost.value);
+    return Number.isFinite(value) && value >= 0 && value <= 100 ? value : null;
+  }
+
+  function makeOverpassQuery(position, radius) {
+    const { latitude, longitude } = position.coords;
+    const area = `(around:${radius},${latitude},${longitude})`;
+    return `[out:json][timeout:25];(nwr${area}["cuisine"~"kebab|kebap|doner|döner|shawarma",i];nwr${area}["name"~"kebab|kebap|doner|döner|shawarma",i];);out center tags;`;
+  }
+
+  function normalizeShops(elementsFromApi, position) {
+    const uniqueShops = new Map();
+
+    for (const element of elementsFromApi) {
+      const tags = element.tags || {};
+      const coordinates = getElementCoordinates(element);
+      if (!coordinates) {
+        continue;
+      }
+
+      const id = `${element.type}/${element.id}`;
+      const distanceKm = haversineDistanceKm(
+        position.coords.latitude,
+        position.coords.longitude,
+        coordinates.lat,
+        coordinates.lon,
+      );
+      uniqueShops.set(id, {
+        id,
+        name: tags.name || tags["name:nb"] || "Kebabsted uten navn",
+        address: getAddress(tags),
+        cuisine: tags.cuisine || "",
+        distanceKm,
+        lat: coordinates.lat,
+        lon: coordinates.lon,
+      });
+    }
+
+    return [...uniqueShops.values()].sort((a, b) => a.distanceKm - b.distanceKm);
+  }
+
+  async function searchNearby(position) {
+    if (requestController) {
+      requestController.abort();
+    }
+    requestController = new AbortController();
+    const { signal } = requestController;
+    const query = makeOverpassQuery(position, Number(elements.radius.value));
+
+    shops = [];
+    shopPrices.clear();
+    elements.findButton.disabled = true;
+    elements.findButton.querySelector("span").textContent = "Søker …";
+    setStatus("Søker etter kebabsteder i OpenStreetMap …");
+    elements.comparison.hidden = true;
+    elements.shopList.replaceChildren();
+    elements.emptyState.hidden = true;
+
+    try {
+      const [response, communityError] = await Promise.all([
+        fetch(OVERPASS_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+          body: `data=${encodeURIComponent(query)}`,
+          signal,
+        }),
+        loadCommunityPrices().then(() => null).catch((error) => error),
+      ]);
+      if (!response.ok) {
+        throw new Error(`Karttjenesten svarte med ${response.status}.`);
+      }
+
+      const data = await response.json();
+      if (!Array.isArray(data.elements)) {
+        throw new Error("Karttjenesten returnerte et ugyldig svar.");
+      }
+      shops = normalizeShops(data.elements, position);
+      shopPrices = new Map();
+      renderResults();
+
+      if (shops.length === 0) {
+        setStatus("Fant ingen kebabsteder i området. Prøv en større søkeavstand.", "error");
+        elements.emptyState.hidden = false;
+        elements.emptyState.querySelector("strong").textContent = "Ingen steder funnet i dette området.";
+        elements.emptyState.querySelector("span").textContent = "Prøv å utvide søkeavstanden eller søk igjen senere.";
+      } else {
+        const matchingReports = shops.filter((shop) => communityPrices.has(shop.id)).length;
+        if (communityError) {
+          setStatus(`Fant ${shops.length} steder, men godkjente prisrapporter kunne ikke lastes inn. Du kan fortsatt sammenligne manuelt.`, "error");
+        } else {
+          const reportStatus = matchingReports
+            ? ` ${matchingReports} ${matchingReports === 1 ? "sted har" : "steder har"} godkjent pris.`
+            : "";
+          setStatus(`Fant ${shops.length} ${shops.length === 1 ? "sted" : "steder"}.${reportStatus} Legg inn eller logg priser for å sammenligne.`, "success");
+        }
+      }
+    } catch (error) {
+      if (error.name === "AbortError") {
+        return;
+      }
+      shops = [];
+      renderResults();
+      elements.emptyState.hidden = false;
+      elements.emptyState.querySelector("strong").textContent = "Kunne ikke hente steder akkurat nå.";
+      elements.emptyState.querySelector("span").textContent = "Sjekk internettforbindelsen og prøv igjen.";
+      setStatus(error.message || "Noe gikk galt da stedene skulle hentes.", "error");
+    } finally {
+      if (!signal.aborted) {
+        elements.findButton.disabled = false;
+        elements.findButton.querySelector("span").textContent = "Finn steder";
+        requestController = null;
+      }
+    }
+  }
+
+  function renderComparison() {
+    const fuelCost = getFuelCost();
+    const nearest = shops[0] || null;
+    if (!nearest) {
+      elements.comparison.hidden = true;
+      elements.comparison.replaceChildren();
+      return;
+    }
+
+    const pricedShops = shops
+      .map((shop) => ({ ...shop, price: getPrice(shop.id) }))
+      .filter((shop) => shop.price !== null);
+    const best = fuelCost === null ? null : BilligKebabPricing.findBestDeal(pricedShops, fuelCost);
+    let heading;
+    let detail;
+    if (fuelCost === null) {
+      heading = "Skriv inn drivstoffkostnad per kilometer.";
+      detail = "Bruk et tall fra 0 til 100 kr/km for å regne ut turen.";
+    } else if (!best) {
+      heading = "Legg inn kebabprisene for å sammenligne.";
+      detail = "Start med prisen på det nærmeste stedet — så ser du om en kjøretur lønner seg.";
+    } else {
+      const nearestPrice = getPrice(nearest.id);
+      const nearestTrip = BilligKebabPricing.estimateTrip(nearest.distanceKm, fuelCost);
+      const nearestTotal = nearestPrice === null ? null : nearestPrice + nearestTrip.fuelCost;
+      const saving = nearestTotal === null ? null : Math.max(0, nearestTotal - best.totalCost);
+
+      heading = best.id === nearest.id
+        ? `${best.name} lønner seg best — og er nærmest.`
+        : `${best.name} er billigst når kjøreturen er med.`;
+      detail = saving === null
+        ? `Fyll inn prisen hos ${nearest.name} for å se hvor mye du sparer mot nærmeste.`
+        : saving > 0
+          ? `Du sparer ca. ${formatMoney(saving)} mot nærmeste, inkludert drivstoff tur-retur.`
+          : `Nærmeste alternativ koster omtrent ${formatMoney(best.totalCost)} totalt, inkludert drivstoff tur-retur.`;
+    }
+
+    elements.comparison.innerHTML = `
+      <span class="comparison-icon" aria-hidden="true">✓</span>
+      <span class="comparison-copy">
+        <strong>${escapeHtml(heading)}</strong>
+        <span>${escapeHtml(detail)}</span>
+      </span>`;
+    elements.comparison.hidden = false;
+  }
+
+  function updateRenderedCosts() {
+    const fuelCost = getFuelCost();
+    const pricedShops = shops
+      .map((shop) => ({ ...shop, price: getPrice(shop.id) }))
+      .filter((shop) => shop.price !== null);
+    const best = fuelCost === null ? null : BilligKebabPricing.findBestDeal(pricedShops, fuelCost);
+    const nearestId = shops[0] && shops[0].id;
+
+    for (const card of elements.shopList.querySelectorAll(".shop-card")) {
+      const shop = shops.find((item) => item.id === card.dataset.shopId);
+      if (!shop) {
+        continue;
+      }
+
+      const price = getPrice(shop.id);
+      const trip = fuelCost === null ? null : BilligKebabPricing.estimateTrip(shop.distanceKm, fuelCost);
+      const total = price !== null && trip ? price + trip.fuelCost : null;
+      const isBest = best && best.id === shop.id;
+      card.classList.toggle("is-best", Boolean(isBest));
+      card.querySelector('[data-badge="nearest"]').hidden = shop.id !== nearestId;
+      card.querySelector('[data-badge="best"]').hidden = !isBest || shop.id === nearestId;
+      card.querySelector(".total-cost span").textContent = trip
+        ? `${formatDistance(trip.roundTripKm)} km t/r · ${formatMoney(trip.fuelCost)} drivstoff`
+        : "Totalpris inkl. kjøretur";
+      const totalLabel = card.querySelector(".total-cost strong");
+      totalLabel.textContent = total === null ? "Legg inn pris" : formatMoney(total);
+      totalLabel.classList.toggle("is-pending", total === null);
+    }
+
+    renderComparison();
+  }
+
+  function renderResults() {
+    const fuelCost = getFuelCost();
+    const pricedShops = shops
+      .map((shop) => ({ ...shop, price: getPrice(shop.id) }))
+      .filter((shop) => shop.price !== null);
+    const best = fuelCost === null
+      ? null
+      : BilligKebabPricing.findBestDeal(pricedShops, fuelCost);
+    const nearestId = shops[0] && shops[0].id;
+
+    elements.shopList.innerHTML = shops.map((shop) => {
+      const price = getPrice(shop.id);
+      const trip = fuelCost === null ? null : BilligKebabPricing.estimateTrip(shop.distanceKm, fuelCost);
+      const total = price !== null && trip ? price + trip.fuelCost : null;
+      const isBest = best && best.id === shop.id;
+      const manualPrice = getManualPrice(shop.id);
+      const communityReport = communityPrices.get(shop.id);
+      const mapUrl = `https://www.openstreetmap.org/?mlat=${shop.lat}&mlon=${shop.lon}#map=17/${shop.lat}/${shop.lon}`;
+      const cuisine = shop.cuisine ? `<span>${escapeHtml(shop.cuisine)}</span>` : "";
+      const communityReportText = communityReport
+        ? `<span class="community-price">Sist meldt: ${escapeHtml(communityReport.product)} · ${formatMoney(communityReport.price)} · ${formatReportDate(communityReport.observedAt)} · <a href="https://github.com/${REPOSITORY}/issues/${communityReport.issueNumber}" target="_blank" rel="noreferrer">rapport</a></span>`
+        : "";
+
+      return `
+        <article class="shop-card${isBest ? " is-best" : ""}" data-shop-id="${escapeHtml(shop.id)}">
+          <div class="shop-info">
+            <div class="shop-title-row">
+              <strong class="shop-title">${escapeHtml(shop.name)}</strong>
+              <span class="shop-badge" data-badge="nearest"${shop.id === nearestId ? "" : " hidden"}>Nærmest</span>
+              <span class="shop-badge" data-badge="best"${isBest && shop.id !== nearestId ? "" : " hidden"}>Billigst totalt</span>
+            </div>
+            <div class="shop-meta">
+              <span>${escapeHtml(shop.address)}</span>
+              ${cuisine}
+              <span>${formatDistance(shop.distanceKm)} km unna</span>
+              <a href="${mapUrl}" target="_blank" rel="noreferrer">Vis kart ↗</a>
+              ${communityReportText}
+            </div>
+          </div>
+          <div class="shop-math">
+            <label class="price-field">
+              <span>Din pris</span>
+              <span class="price-input-wrap"><input class="price-input" type="number" min="0" max="9999" step="1" inputmode="numeric" data-shop-id="${escapeHtml(shop.id)}" aria-label="Din kebabpris hos ${escapeHtml(shop.name)} i kroner" value="${manualPrice === null ? "" : manualPrice}"><span>kr</span></span>
+            </label>
+            <div class="total-cost">
+              <span>${trip ? `${formatDistance(trip.roundTripKm)} km t/r · ${formatMoney(trip.fuelCost)} drivstoff` : "Totalpris inkl. kjøretur"}</span>
+              <strong class="${total === null ? "is-pending" : ""}">${total === null ? "Legg inn pris" : formatMoney(total)}</strong>
+            </div>
+          </div>
+          <details class="report-details">
+            <summary>Logg en pris for andre</summary>
+            <form class="price-report-form" data-shop-id="${escapeHtml(shop.id)}">
+              <div class="report-fields">
+                <label>Kebabtype<input name="product" type="text" maxlength="70" value="Kebab" required></label>
+                <label>Pris i kroner<input name="report-price" type="number" min="1" max="9999" step="1" inputmode="numeric" value="${manualPrice === null ? "" : manualPrice}" required></label>
+                <label>Dato kjøpt<input name="observed-at" type="date" value="${localDate()}" required></label>
+              </div>
+              <label class="report-note">Kommentar (valgfritt)<input name="note" type="text" maxlength="200" placeholder="For eksempel størrelse eller menyvalg"></label>
+              <button class="report-submit" type="submit">Send inn via GitHub</button>
+              <p class="report-help">Rapporten blir offentlig og vises i appen først etter at den er kontrollert. GitHub-innlogging kreves.</p>
+            </form>
+          </details>
+        </article>`;
+    }).join("");
+
+    elements.emptyState.hidden = shops.length > 0;
+    if (shops.length === 0 && currentPosition) {
+      elements.emptyState.querySelector("strong").textContent = "Ingen steder funnet i dette området.";
+      elements.emptyState.querySelector("span").textContent = "Prøv å utvide søkeavstanden eller søk igjen senere.";
+    }
+    updateRenderedCosts();
+  }
+
+  function requestLocation() {
+    if (!navigator.geolocation) {
+      setStatus("Nettleseren din støtter ikke posisjonstjenester.", "error");
+      return;
+    }
+
+    elements.findButton.disabled = true;
+    elements.findButton.querySelector("span").textContent = "Henter posisjon …";
+    setStatus("Venter på posisjonen din …");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        currentPosition = position;
+        searchNearby(position);
+      },
+      (error) => {
+        elements.findButton.disabled = false;
+        elements.findButton.querySelector("span").textContent = "Finn steder";
+        const messages = {
+          1: "Posisjonstilgang ble avslått. Tillat posisjon i nettleseren og prøv igjen.",
+          2: "Fant ikke posisjonen din. Sjekk posisjonsinnstillingene og prøv igjen.",
+          3: "Det tok for lang tid å hente posisjonen. Prøv igjen.",
+        };
+        setStatus(messages[error.code] || "Kunne ikke hente posisjonen din.", "error");
+      },
+      { enableHighAccuracy: false, timeout: 12000, maximumAge: 60000 },
+    );
+  }
+
+  elements.findButton.addEventListener("click", requestLocation);
+  elements.radius.addEventListener("change", () => {
+    if (currentPosition) {
+      searchNearby(currentPosition);
+    }
+  });
+  elements.fuelCost.addEventListener("input", updateRenderedCosts);
+  elements.shopList.addEventListener("input", (event) => {
+    const input = event.target.closest(".price-input");
+    if (!input) {
+      return;
+    }
+    shopPrices.set(input.dataset.shopId, input.value);
+    updateRenderedCosts();
+  });
+  elements.shopList.addEventListener("submit", (event) => {
+    const form = event.target.closest(".price-report-form");
+    if (!form) {
+      return;
+    }
+    event.preventDefault();
+
+    const shop = shops.find((item) => item.id === form.dataset.shopId);
+    if (!shop) {
+      setStatus("Fant ikke restauranten for prisrapporten. Søk etter steder på nytt.", "error");
+      return;
+    }
+
+    const product = cleanLine(form.elements.product.value);
+    const price = Number(form.elements["report-price"].value);
+    const observedAt = form.elements["observed-at"].value;
+    const note = cleanLine(form.elements.note.value) || "Ingen kommentar";
+    if (!product || !Number.isFinite(price) || price <= 0 || price > 9999 || !/^\d{4}-\d{2}-\d{2}$/.test(observedAt)) {
+      setStatus("Sjekk kebabtype, pris og dato før du sender inn.", "error");
+      return;
+    }
+
+    const body = [
+      "### Restaurant",
+      cleanLine(shop.name),
+      "",
+      "### OSM place ID",
+      shop.id,
+      "",
+      "### Kebabtype",
+      product,
+      "",
+      "### Pris (NOK)",
+      String(price),
+      "",
+      "### Dato",
+      observedAt,
+      "",
+      "### Kommentar",
+      note,
+    ].join("\n");
+    const title = `Prisrapport: ${cleanLine(shop.name)} — ${formatMoney(price)}`;
+    const query = new URLSearchParams({
+      template: "price-report.md",
+      title,
+      body,
+      labels: "price-report",
+    });
+    window.open(`https://github.com/${REPOSITORY}/issues/new?${query}`, "_blank", "noopener,noreferrer");
+    form.closest("details").open = false;
+    setStatus("Prisrapporten er åpnet i GitHub. Logg inn og send den inn for kontroll.", "success");
+  });
+})();
