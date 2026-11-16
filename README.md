@@ -18,11 +18,11 @@ The app uses the Firebase project configuration supplied by the project owner in
 
 1. Enable **Email/Password** under Firebase Authentication sign-in providers.
 2. Create the default Cloud Firestore database.
-3. Add the block from `firestore-price-reports.rules` inside your existing `match /databases/{database}/documents` rules.
+3. In **Firestore Database → Rules**, add the block from `firestore-price-reports.rules` inside your existing `match /databases/{database}/documents` rules, then publish the merged rules.
 4. Add `springo2008.github.io` and `localhost` to Authentication's authorized domains.
 5. The first submitted price creates the `priceReports` collection automatically.
 
-This Firebase project is also used by the Whiteboard app. Merge the price-report rules block into the existing rules; do not replace the full ruleset or the Whiteboard's permissions will be removed. Firebase's web configuration is public by design; it does not grant database access by itself. Restrict the API key to the app's domains and required Firebase APIs, and never publish a service-account key. Firebase usage is subject to the project's quotas and billing settings.
+This Firebase project is also used by the Whiteboard app. Merge the price-report rules block into the existing rules; do not replace the full ruleset or the Whiteboard's permissions will be removed. Without that block, Firebase returns `permission-denied` and reports cannot be read or submitted. Firebase's web configuration is public by design; it does not grant database access by itself. Restrict the API key to the app's domains and required Firebase APIs, and never publish a service-account key. Firebase usage is subject to the project's quotas and billing settings.
 
 ## Submit and approve prices
 

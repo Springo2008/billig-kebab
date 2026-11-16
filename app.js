@@ -44,9 +44,11 @@ const BilligKebabReports = window.BilligKebabReports;
   let shopPrices = new Map();
   let communityPrices = new Map();
   let communityPricesLoaded = false;
+  let communityPricesPromise = null;
   let currentPosition = null;
   let currentUser = null;
   let isRegistering = false;
+  let activeSearchId = 0;
   let requestController = null;
 
   function setStatus(message, kind) {
@@ -126,14 +128,22 @@ const BilligKebabReports = window.BilligKebabReports;
     return report ? report.price : null;
   }
 
-  async function loadCommunityPrices() {
+  function loadCommunityPrices() {
     if (communityPricesLoaded) {
-      return;
+      return Promise.resolve();
     }
-
-    const reports = await getApprovedPriceReports();
-    communityPrices = BilligKebabReports.latestApprovedReports(reports);
-    communityPricesLoaded = true;
+    if (!communityPricesPromise) {
+      communityPricesPromise = getApprovedPriceReports()
+        .then((reports) => {
+          communityPrices = BilligKebabReports.latestApprovedReports(reports);
+          communityPricesLoaded = true;
+        })
+        .catch((error) => {
+          communityPricesPromise = null;
+          throw error;
+        });
+    }
+    return communityPricesPromise;
   }
 
   function localDate() {
@@ -254,7 +264,9 @@ const BilligKebabReports = window.BilligKebabReports;
     }
     requestController = new AbortController();
     const { signal } = requestController;
+    const searchId = ++activeSearchId;
     const query = makeOverpassQuery(position, Number(elements.radius.value));
+    const communityPromise = loadCommunityPrices().then(() => null).catch((error) => error);
 
     shops = [];
     shopPrices.clear();
@@ -266,11 +278,7 @@ const BilligKebabReports = window.BilligKebabReports;
     elements.emptyState.hidden = true;
 
     try {
-      const [data, communityError] = await Promise.all([
-        requestOverpass(query, signal),
-        loadCommunityPrices().then(() => null).catch((error) => error),
-      ]);
-
+      const data = await requestOverpass(query, signal);
       shops = normalizeShops(data.elements, position);
       shopPrices = new Map();
       renderResults();
@@ -281,15 +289,27 @@ const BilligKebabReports = window.BilligKebabReports;
         elements.emptyState.querySelector("strong").textContent = "Ingen steder funnet i dette området.";
         elements.emptyState.querySelector("span").textContent = "Prøv å utvide søkeavstanden eller søk igjen senere.";
       } else {
-        const matchingReports = shops.filter((shop) => communityPrices.has(shop.id)).length;
-        if (communityError) {
-          setStatus(`Fant ${shops.length} ${shops.length === 1 ? "sted" : "steder"}, men godkjente prisrapporter kunne ikke hentes fra Firebase. Du kan fortsatt sammenligne manuelt.`, "error");
-        } else {
+        setStatus(`Fant ${shops.length} ${shops.length === 1 ? "sted" : "steder"} — henter godkjente prisrapporter …`, "success");
+        communityPromise.then((error) => {
+          if (signal.aborted || searchId !== activeSearchId || shops.length === 0) {
+            return;
+          }
+          if (error) {
+            const message = error.code === "permission-denied"
+              ? "Firestore-reglene mangler tilgang til godkjente prisrapporter. Se oppsettet i README."
+              : `Firebase-feil: ${error.code || error.message || "ukjent feil"}.`;
+            setStatus(`${message} Du kan fortsatt sammenligne manuelt.`, "error");
+            return;
+          }
+
+          updateCommunityReportNotes();
+          updateRenderedCosts();
+          const matchingReports = shops.filter((shop) => communityPrices.has(shop.id)).length;
           const reportStatus = matchingReports
             ? ` ${matchingReports} ${matchingReports === 1 ? "sted har" : "steder har"} godkjent pris.`
             : "";
           setStatus(`Fant ${shops.length} ${shops.length === 1 ? "sted" : "steder"}.${reportStatus} Legg inn eller logg priser for å sammenligne.`, "success");
-        }
+        });
       }
     } catch (error) {
       if (error.name === "AbortError") {
@@ -388,6 +408,19 @@ const BilligKebabReports = window.BilligKebabReports;
     renderComparison();
   }
 
+  function updateCommunityReportNotes() {
+    for (const card of elements.shopList.querySelectorAll(".shop-card")) {
+      const report = communityPrices.get(card.dataset.shopId);
+      const note = card.querySelector("[data-community-price]");
+      if (!report || !note) {
+        continue;
+      }
+
+      note.textContent = `Sist godkjent: ${report.product} · ${formatMoney(report.price)} · ${formatReportDate(report.observedAt)}`;
+      note.hidden = false;
+    }
+  }
+
   function renderResults() {
     const fuelCost = getFuelCost();
     const pricedShops = shops
@@ -408,7 +441,7 @@ const BilligKebabReports = window.BilligKebabReports;
       const mapUrl = `https://www.openstreetmap.org/?mlat=${shop.lat}&mlon=${shop.lon}#map=17/${shop.lat}/${shop.lon}`;
       const cuisine = shop.cuisine ? `<span>${escapeHtml(shop.cuisine)}</span>` : "";
       const communityReportText = communityReport
-        ? `<span class="community-price">Sist godkjent: ${escapeHtml(communityReport.product)} · ${formatMoney(communityReport.price)} · ${formatReportDate(communityReport.observedAt)}</span>`
+        ? `Sist godkjent: ${escapeHtml(communityReport.product)} · ${formatMoney(communityReport.price)} · ${formatReportDate(communityReport.observedAt)}`
         : "";
 
       return `
@@ -424,7 +457,7 @@ const BilligKebabReports = window.BilligKebabReports;
               ${cuisine}
               <span>${formatDistance(shop.distanceKm)} km unna</span>
               <a href="${mapUrl}" target="_blank" rel="noreferrer">Vis kart ↗</a>
-              ${communityReportText}
+              <span class="community-price" data-community-price${communityReport ? "" : " hidden"}>${communityReportText}</span>
             </div>
           </div>
           <div class="shop-math">
