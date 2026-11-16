@@ -1,10 +1,36 @@
+import "./pricing.js";
+import "./reports.js";
+import {
+  auth,
+  createUserWithEmailAndPassword,
+  getApprovedPriceReports,
+  onAuthStateChanged,
+  savePriceReport,
+  signInWithEmailAndPassword,
+  signOut,
+} from "./firebase.js";
+
+const BilligKebabPricing = window.BilligKebabPricing;
+const BilligKebabReports = window.BilligKebabReports;
+
 (function () {
   "use strict";
 
-  const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
-  const REPOSITORY = "Springo2008/billig-kebab";
-  const COMMUNITY_REPORTS_URL = `https://api.github.com/repos/${REPOSITORY}/issues?state=closed&labels=verified-price&per_page=100&sort=updated&direction=desc`;
+  const OVERPASS_URLS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://ovp.dresel.systems/api/interpreter",
+  ];
   const elements = {
+    authClose: document.getElementById("auth-close-button"),
+    authError: document.getElementById("auth-error"),
+    authForm: document.getElementById("auth-form"),
+    authLogout: document.getElementById("auth-logout-button"),
+    authOpen: document.getElementById("auth-open-button"),
+    authPanel: document.getElementById("auth-panel"),
+    authSubmit: document.getElementById("auth-submit-button"),
+    authTitle: document.getElementById("auth-title"),
+    authToggle: document.getElementById("auth-toggle-button"),
+    authUser: document.getElementById("auth-user"),
     comparison: document.getElementById("comparison"),
     emptyState: document.getElementById("empty-state"),
     findButton: document.getElementById("find-button"),
@@ -19,6 +45,8 @@
   let communityPrices = new Map();
   let communityPricesLoaded = false;
   let currentPosition = null;
+  let currentUser = null;
+  let isRegistering = false;
   let requestController = null;
 
   function setStatus(message, kind) {
@@ -103,17 +131,8 @@
       return;
     }
 
-    const response = await fetch(COMMUNITY_REPORTS_URL, {
-      headers: { Accept: "application/vnd.github+json" },
-    });
-    if (!response.ok) {
-      throw new Error(`GitHub svarte med ${response.status}.`);
-    }
-    const issues = await response.json();
-    if (!Array.isArray(issues)) {
-      throw new Error("GitHub returnerte et ugyldig svar.");
-    }
-    communityPrices = BilligKebabReports.latestVerifiedReports(issues);
+    const reports = await getApprovedPriceReports();
+    communityPrices = BilligKebabReports.latestApprovedReports(reports);
     communityPricesLoaded = true;
   }
 
@@ -150,6 +169,52 @@
     const { latitude, longitude } = position.coords;
     const area = `(around:${radius},${latitude},${longitude})`;
     return `[out:json][timeout:25];(nwr${area}["cuisine"~"kebab|kebap|doner|döner|shawarma",i];nwr${area}["name"~"kebab|kebap|doner|döner|shawarma",i];);out center tags;`;
+  }
+
+  async function requestOverpass(query, signal) {
+    let lastError = null;
+
+    for (const endpoint of OVERPASS_URLS) {
+      if (signal.aborted) {
+        throw new DOMException("Søket ble avbrutt.", "AbortError");
+      }
+
+      const requestController = new AbortController();
+      const cancelRequest = () => requestController.abort();
+      const timeoutId = setTimeout(cancelRequest, 12000);
+      signal.addEventListener("abort", cancelRequest, { once: true });
+
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+          body: `data=${encodeURIComponent(query)}`,
+          signal: requestController.signal,
+        });
+        if (!response.ok) {
+          throw new Error(`${endpoint} svarte med ${response.status}.`);
+        }
+
+        const data = await response.json();
+        if (!Array.isArray(data.elements)) {
+          throw new Error("Karttjenesten returnerte et ugyldig svar.");
+        }
+        return data;
+      } catch (error) {
+        if (signal.aborted) {
+          throw error;
+        }
+        lastError = error;
+      } finally {
+        clearTimeout(timeoutId);
+        signal.removeEventListener("abort", cancelRequest);
+      }
+    }
+
+    const reason = lastError && lastError.name === "AbortError"
+      ? "forespørselen tok for lang tid"
+      : lastError && lastError.message;
+    throw new Error(`Begge OpenStreetMap-karttjenestene feilet${reason ? `: ${reason}` : "."}`);
   }
 
   function normalizeShops(elementsFromApi, position) {
@@ -201,23 +266,11 @@
     elements.emptyState.hidden = true;
 
     try {
-      const [response, communityError] = await Promise.all([
-        fetch(OVERPASS_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-          body: `data=${encodeURIComponent(query)}`,
-          signal,
-        }),
+      const [data, communityError] = await Promise.all([
+        requestOverpass(query, signal),
         loadCommunityPrices().then(() => null).catch((error) => error),
       ]);
-      if (!response.ok) {
-        throw new Error(`Karttjenesten svarte med ${response.status}.`);
-      }
 
-      const data = await response.json();
-      if (!Array.isArray(data.elements)) {
-        throw new Error("Karttjenesten returnerte et ugyldig svar.");
-      }
       shops = normalizeShops(data.elements, position);
       shopPrices = new Map();
       renderResults();
@@ -230,7 +283,7 @@
       } else {
         const matchingReports = shops.filter((shop) => communityPrices.has(shop.id)).length;
         if (communityError) {
-          setStatus(`Fant ${shops.length} steder, men godkjente prisrapporter kunne ikke lastes inn. Du kan fortsatt sammenligne manuelt.`, "error");
+          setStatus(`Fant ${shops.length} ${shops.length === 1 ? "sted" : "steder"}, men godkjente prisrapporter kunne ikke hentes fra Firebase. Du kan fortsatt sammenligne manuelt.`, "error");
         } else {
           const reportStatus = matchingReports
             ? ` ${matchingReports} ${matchingReports === 1 ? "sted har" : "steder har"} godkjent pris.`
@@ -355,7 +408,7 @@
       const mapUrl = `https://www.openstreetmap.org/?mlat=${shop.lat}&mlon=${shop.lon}#map=17/${shop.lat}/${shop.lon}`;
       const cuisine = shop.cuisine ? `<span>${escapeHtml(shop.cuisine)}</span>` : "";
       const communityReportText = communityReport
-        ? `<span class="community-price">Sist meldt: ${escapeHtml(communityReport.product)} · ${formatMoney(communityReport.price)} · ${formatReportDate(communityReport.observedAt)} · <a href="https://github.com/${REPOSITORY}/issues/${communityReport.issueNumber}" target="_blank" rel="noreferrer">rapport</a></span>`
+        ? `<span class="community-price">Sist godkjent: ${escapeHtml(communityReport.product)} · ${formatMoney(communityReport.price)} · ${formatReportDate(communityReport.observedAt)}</span>`
         : "";
 
       return `
@@ -393,8 +446,8 @@
                 <label>Dato kjøpt<input name="observed-at" type="date" value="${localDate()}" required></label>
               </div>
               <label class="report-note">Kommentar (valgfritt)<input name="note" type="text" maxlength="200" placeholder="For eksempel størrelse eller menyvalg"></label>
-              <button class="report-submit" type="submit">Send inn via GitHub</button>
-              <p class="report-help">Rapporten blir offentlig og vises i appen først etter at den er kontrollert. GitHub-innlogging kreves.</p>
+              <button class="report-submit" type="submit">Send inn pris</button>
+              <p class="report-help">Du må logge inn. Prisen vises først etter at den er godkjent.</p>
             </form>
           </details>
         </article>`;
@@ -451,12 +504,20 @@
     shopPrices.set(input.dataset.shopId, input.value);
     updateRenderedCosts();
   });
-  elements.shopList.addEventListener("submit", (event) => {
+  elements.shopList.addEventListener("submit", async (event) => {
     const form = event.target.closest(".price-report-form");
     if (!form) {
       return;
     }
     event.preventDefault();
+
+    if (!currentUser) {
+      elements.authPanel.hidden = false;
+      elements.authError.textContent = "";
+      elements.authForm.elements.email.focus();
+      setStatus("Logg inn eller opprett en konto for å sende inn en pris.", "error");
+      return;
+    }
 
     const shop = shops.find((item) => item.id === form.dataset.shopId);
     if (!shop) {
@@ -473,34 +534,87 @@
       return;
     }
 
-    const body = [
-      "### Restaurant",
-      cleanLine(shop.name),
-      "",
-      "### OSM place ID",
-      shop.id,
-      "",
-      "### Kebabtype",
-      product,
-      "",
-      "### Pris (NOK)",
-      String(price),
-      "",
-      "### Dato",
-      observedAt,
-      "",
-      "### Kommentar",
-      note,
-    ].join("\n");
-    const title = `Prisrapport: ${cleanLine(shop.name)} — ${formatMoney(price)}`;
-    const query = new URLSearchParams({
-      template: "price-report.md",
-      title,
-      body,
-      labels: "price-report",
-    });
-    window.open(`https://github.com/${REPOSITORY}/issues/new?${query}`, "_blank", "noopener,noreferrer");
-    form.closest("details").open = false;
-    setStatus("Prisrapporten er åpnet i GitHub. Logg inn og send den inn for kontroll.", "success");
+    try {
+      await savePriceReport({
+        restaurantId: shop.id,
+        restaurantName: cleanLine(shop.name),
+        address: cleanLine(shop.address),
+        lat: shop.lat,
+        lon: shop.lon,
+        product,
+        price,
+        observedAt,
+        note,
+      });
+      form.closest("details").open = false;
+      setStatus("Takk! Prisen er sendt inn og venter på godkjenning.", "success");
+    } catch (error) {
+      setStatus(`Kunne ikke lagre prisen i Firebase (${error.code || error.message || "ukjent feil"}).`, "error");
+    }
+  });
+
+  function setAuthMode(registering) {
+    isRegistering = registering;
+    elements.authTitle.textContent = registering ? "Opprett konto" : "Logg inn";
+    elements.authSubmit.textContent = registering ? "Opprett konto" : "Logg inn";
+    elements.authToggle.textContent = registering ? "Har du allerede konto? Logg inn" : "Ny her? Opprett konto";
+    elements.authError.textContent = "";
+  }
+
+  elements.authOpen.addEventListener("click", () => {
+    setAuthMode(false);
+    elements.authPanel.hidden = false;
+    elements.authForm.elements.email.focus();
+  });
+  elements.authClose.addEventListener("click", () => {
+    elements.authPanel.hidden = true;
+  });
+  elements.authPanel.addEventListener("click", (event) => {
+    if (event.target === elements.authPanel) {
+      elements.authPanel.hidden = true;
+    }
+  });
+  elements.authToggle.addEventListener("click", () => setAuthMode(!isRegistering));
+  elements.authForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    elements.authError.textContent = "";
+    const email = elements.authForm.elements.email.value.trim();
+    const password = elements.authForm.elements.password.value;
+
+    try {
+      if (isRegistering) {
+        await createUserWithEmailAndPassword(auth, email, password);
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+      }
+    } catch (error) {
+      const messages = {
+        "auth/email-already-in-use": "E-postadressen har allerede en konto.",
+        "auth/invalid-credential": "Ugyldig e-post eller passord.",
+        "auth/invalid-email": "Skriv inn en gyldig e-postadresse.",
+        "auth/operation-not-allowed": "E-postinnlogging må aktiveres i Firebase Console.",
+        "auth/too-many-requests": "For mange forsøk. Vent litt og prøv igjen.",
+        "auth/weak-password": "Passordet må være minst 6 tegn.",
+      };
+      elements.authError.textContent = messages[error.code] || `Kunne ikke logge inn (${error.code || error.message || "ukjent feil"}).`;
+    }
+  });
+  elements.authLogout.addEventListener("click", async () => {
+    try {
+      await signOut(auth);
+      setStatus("Du er logget ut.", "success");
+    } catch (error) {
+      setStatus(`Kunne ikke logge ut (${error.code || error.message || "ukjent feil"}).`, "error");
+    }
+  });
+  onAuthStateChanged(auth, (user) => {
+    currentUser = user;
+    elements.authOpen.hidden = Boolean(user);
+    elements.authLogout.hidden = !user;
+    elements.authUser.hidden = !user;
+    elements.authUser.textContent = user ? user.email : "";
+    if (user) {
+      elements.authPanel.hidden = true;
+    }
   });
 })();

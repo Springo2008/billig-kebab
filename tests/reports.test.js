@@ -2,55 +2,48 @@
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { latestVerifiedReports } = require("../reports.js");
+const { latestApprovedReports } = require("../reports.js");
 
-function priceIssue(number, date, price, extra = {}) {
+function priceReport(id, date, price, extra = {}) {
   return {
-    number,
-    state: "closed",
-    labels: [{ name: "verified-price" }],
-    body: `### Restaurant
-Kebab Corner
-
-### OSM place ID
-node/123
-
-### Kebabtype
-Rullekebab
-
-### Pris (NOK)
-${price}
-
-### Dato
-${date}
-
-### Kommentar
-`,
+    id,
+    status: "approved",
+    restaurantId: "node/123",
+    restaurantName: "Kebab Corner",
+    product: "Rullekebab",
+    price,
+    observedAt: date,
+    createdAt: 0,
     ...extra,
   };
 }
 
-test("uses the most recent verified report for each place", () => {
-  const reports = latestVerifiedReports([
-    priceIssue(4, "2026-10-12", "125"),
-    priceIssue(5, "2026-11-01", "135"),
+test("uses the newest approved report for each restaurant", () => {
+  const reports = latestApprovedReports([
+    priceReport("older", "2026-10-12", 125),
+    priceReport("newer", "2026-11-01", 135),
   ]);
 
   assert.equal(reports.get("node/123").price, 135);
   assert.equal(reports.get("node/123").observedAt, "2026-11-01");
 });
 
-test("ignores unverified, pull-request, malformed, and future place records", () => {
-  const unverified = priceIssue(6, "2026-11-10", "90", {
-    labels: [{ name: "price-report" }],
-  });
-  const pullRequest = priceIssue(7, "2026-11-11", "80", {
-    pull_request: { url: "https://api.github.com/repos/example/example/pulls/7" },
-  });
-  const badDate = priceIssue(8, "2026-02-31", "80");
-  const badPlace = priceIssue(9, "2026-11-12", "80", {
-    body: priceIssue(9, "2026-11-12", "80").body.replace("node/123", "javascript:alert(1)"),
-  });
+test("uses submission time to break ties on the same purchase date", () => {
+  const reports = latestApprovedReports([
+    priceReport("early", "2026-11-01", 125, { createdAt: 10 }),
+    priceReport("late", "2026-11-01", 135, { createdAt: 20 }),
+  ]);
 
-  assert.equal(latestVerifiedReports([unverified, pullRequest, badDate, badPlace]).size, 0);
+  assert.equal(reports.get("node/123").price, 135);
+});
+
+test("ignores pending and malformed reports", () => {
+  const pending = priceReport("pending", "2026-11-10", 90, { status: "pending" });
+  const badDate = priceReport("bad-date", "2026-02-31", 80);
+  const badPlace = priceReport("bad-place", "2026-11-12", 80, {
+    restaurantId: "javascript:alert(1)",
+  });
+  const badPrice = priceReport("bad-price", "2026-11-12", -10);
+
+  assert.equal(latestApprovedReports([pending, badDate, badPlace, badPrice]).size, 0);
 });

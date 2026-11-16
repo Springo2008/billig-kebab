@@ -83,6 +83,124 @@ a {
   font-size: 12px;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.account-user {
+  max-width: 180px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auth-link,
+.auth-toggle {
+  padding: 5px 0;
+  color: var(--green);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.auth-panel[hidden],
+.auth-user[hidden],
+.auth-link[hidden] {
+  display: none;
+}
+
+.auth-panel {
+  position: fixed;
+  z-index: 10;
+  display: grid;
+  inset: 0;
+  padding: 20px;
+  place-items: center;
+  background: rgba(26, 31, 24, 0.48);
+}
+
+.auth-box {
+  position: relative;
+  width: min(100%, 400px);
+  padding: 28px;
+  background: var(--white);
+  border: 1px solid rgba(36, 40, 31, 0.08);
+  border-radius: 16px;
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.2);
+}
+
+.auth-box .eyebrow {
+  justify-content: flex-start;
+  margin-bottom: 10px;
+}
+
+.auth-box h2 {
+  margin-bottom: 8px;
+}
+
+.auth-close {
+  position: absolute;
+  top: 13px;
+  right: 15px;
+  width: 30px;
+  height: 30px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 23px;
+}
+
+.auth-description {
+  margin-bottom: 18px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+#auth-form {
+  display: grid;
+  gap: 11px;
+}
+
+#auth-form label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+#auth-form input {
+  min-height: 39px;
+  padding: 8px 10px;
+  color: var(--ink);
+  background: #faf9f4;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.auth-error {
+  min-height: 15px;
+  margin: 0;
+  color: #a63d2b;
+  font-size: 10px;
+}
+
+.auth-submit {
+  justify-self: start;
+}
+
+.auth-toggle {
+  justify-self: start;
+}
+
 main {
   width: min(100% - 48px, 848px);
   margin: 0 auto;
@@ -671,7 +789,15 @@ h2 {
   }
 
   .topbar-note {
-    font-size: 10px;
+    display: none;
+  }
+
+  .topbar-actions {
+    gap: 10px;
+  }
+
+  .account-user {
+    max-width: 120px;
   }
 
   main {

@@ -1,0 +1,60 @@
+match /priceReports/{reportId} {
+  function validPriceReport() {
+    return request.auth != null
+      && request.resource.data.keys().hasAll([
+        'restaurantId',
+        'restaurantName',
+        'address',
+        'lat',
+        'lon',
+        'product',
+        'price',
+        'observedAt',
+        'note',
+        'status',
+        'createdAt'
+      ])
+      && request.resource.data.keys().hasOnly([
+        'restaurantId',
+        'restaurantName',
+        'address',
+        'lat',
+        'lon',
+        'product',
+        'price',
+        'observedAt',
+        'note',
+        'status',
+        'createdAt'
+      ])
+      && request.resource.data.restaurantId is string
+      && request.resource.data.restaurantId.matches('^(node|way|relation)/[0-9]+$')
+      && request.resource.data.restaurantName is string
+      && request.resource.data.restaurantName.size() > 0
+      && request.resource.data.restaurantName.size() <= 120
+      && request.resource.data.address is string
+      && request.resource.data.address.size() <= 200
+      && request.resource.data.lat is number
+      && request.resource.data.lat >= -90
+      && request.resource.data.lat <= 90
+      && request.resource.data.lon is number
+      && request.resource.data.lon >= -180
+      && request.resource.data.lon <= 180
+      && request.resource.data.product is string
+      && request.resource.data.product.size() > 0
+      && request.resource.data.product.size() <= 70
+      && request.resource.data.price is number
+      && request.resource.data.price > 0
+      && request.resource.data.price <= 9999
+      && request.resource.data.observedAt is string
+      && request.resource.data.observedAt.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+      && request.resource.data.note is string
+      && request.resource.data.note.size() <= 200
+      && request.resource.data.status == 'pending'
+      && request.resource.data.createdAt == request.time;
+  }
+
+  allow get, list: if resource.data.status == 'approved';
+  allow create: if validPriceReport();
+  allow update, delete: if false;
+}

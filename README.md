@@ -1,6 +1,6 @@
 # Billig kebab
 
-Billig kebab compares nearby kebab shops using OpenStreetMap, your own prices, verified community price reports, and estimated round-trip fuel costs. It is a static site: there is no build step, paid service, or API key.
+Billig kebab finds nearby kebab shops, compares submitted prices plus estimated round-trip fuel costs, and lets people share restaurant prices. The frontend is static and uses Firebase for accounts and reports.
 
 ## Run locally
 
@@ -12,14 +12,26 @@ python -m http.server 8765
 
 Then open `http://localhost:8765`.
 
+## Firebase setup
+
+The app uses the Firebase project configuration supplied by the project owner in `firebase.js`.
+
+1. Enable **Email/Password** under Firebase Authentication sign-in providers.
+2. Create the default Cloud Firestore database.
+3. Add the block from `firestore-price-reports.rules` inside your existing `match /databases/{database}/documents` rules.
+4. Add `springo2008.github.io` and `localhost` to Authentication's authorized domains.
+5. The first submitted price creates the `priceReports` collection automatically.
+
+This Firebase project is also used by the Whiteboard app. Merge the price-report rules block into the existing rules; do not replace the full ruleset or the Whiteboard's permissions will be removed. Firebase's web configuration is public by design; it does not grant database access by itself. Restrict the API key to the app's domains and required Firebase APIs, and never publish a service-account key. Firebase usage is subject to the project's quotas and billing settings.
+
 ## Submit and approve prices
 
-Choose **Logg en pris for andre** on a shop card to prepare a public GitHub issue with the restaurant, OpenStreetMap place ID, kebab type, price, and purchase date. Submitting the issue requires a GitHub account. The report is public, but does not appear in the app until a maintainer checks it, closes the issue, and adds the `verified-price` label. Unverified reports are never used in price comparisons.
+Log in or create an account, then choose **Logg en pris for andre** on a shop card. Reports are saved as `pending` in Firestore and are not used in comparisons until an administrator changes their `status` to `approved` in the Firebase console. Client-side rules prevent users from approving or editing reports. The app reads up to 200 approved reports and uses the newest report per OpenStreetMap place ID.
 
-The app reads up to 100 approved reports from this repository's public GitHub Issues API. Reports are matched by OpenStreetMap element ID, and the newest report for each place is used. Visitors can still enter their own price when no approved report is available. Reports can cover different kebab types, so compare like with like.
+Reports include the kebab type, so compare like with like. Users can always enter their own temporary price in the comparison input.
 
-## Publish
+## Map data and deployment
 
-The `Deploy static site to GitHub Pages` workflow publishes the site on pushes to `main`. Enable GitHub Pages with **GitHub Actions** as the source in the repository settings if it is not already enabled.
+Nearby places come from OpenStreetMap's public Overpass API. If the primary instance fails, the app tries a public fallback instance; Firebase stores prices, not map locations, so it cannot replace OpenStreetMap place search if both map services are unavailable. The app does not store geolocation. Driving costs are estimates based on straight-line distance, a 1.35 road-distance multiplier, and the fuel cost you enter.
 
-The app uses browser geolocation, the public Overpass API, and this repository's public GitHub Issues API. Location is not stored by the app. Driving costs are estimates based on straight-line distance, a 1.35 road-distance multiplier, and the fuel cost you enter.
+The `Deploy static site to GitHub Pages` workflow publishes the site on pushes to `main`.
